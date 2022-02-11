@@ -1,0 +1,184 @@
+---
+title: "Practical Machine Learning - Course Project"
+author: "Boyd C"
+date: "09/02/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Summary
+This project is an attempt to predict how correctly a person did the exercise. The data set contains data pertaining to measurements of body movement during exercise. The data was collected using wearable devises during exercise routine. The model will predict using the variable 'classe'. Using this model we will also predict 20 sample data provided.
+
+## Background
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+The data for this project comes from the source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. 
+
+# Building Prediction Model
+
+### Initialize
+Load required packages and set environment options  
+Load data. The data has been already downloaded from the links provided and stored under the folder 'Course8' within the working directory  
+Training data is loaded into dataframe 'training'  
+Testing data is loaded into dataframe 'testing'  
+Make a copy of training data into 'trainclean'. This data frame is used to clean data by selecting only the required columns to build prediction model  
+
+```{r initialise}
+suppressMessages(library(caret))
+suppressMessages(library(dplyr))
+set.seed(12321)
+options(scipen = 999)
+training <- read.csv("Course8/pml-training.csv")
+testing <- read.csv("Course8/pml-testing.csv")
+trainclean <- training
+```
+### Cleaning Data
+```{r dim}
+dim(trainclean)
+dim(testing)
+```
+
+We can take a quick look at the distribution of Class(classe) values
+
+```{r class-frequency}
+plot(as.factor(training$classe), 
+main = "How 'classe' is distributed within Training data", 
+xlab = "classe (Class)", ylab = "Frequency", col = "green",
+col.axis = "darkgreen", col.lab = "blue", col.main = "purple")
+```
+
+Here is the definition of Class (classe) values  
+Class A : Exactly according to the specification  
+Class B : Throwing the elbows to the front  
+Class C : Lifting the dumbbell only halfway  
+Class D : Lowering the dumbbell only halfway  
+Class E : Throwing the hips to the front  
+
+summary(trainclean) (the result is not displayed here as it is very big)  
+shows that the data frame contains 19622 rows and 160 columns  
+The following columns have only maximum of 406 valid values. Some does not even have any valid values  
+Column names staring with 'max', 'min', 'avg', 'amplitude', 'var', 'stddev', 'kurtosis' and 'skewness'  
+These columns can be removed as they do not have any impact in the prediction model  
+Also, we can remove first 7 columns from the data frame as they also will not have any positive impact to the model  
+'X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window' and 'num_window'  
+
+```{r clean-data}
+trainclean <- select(trainclean, 
+!starts_with("max") & 
+!starts_with("min") & 
+!starts_with("avg") &
+!starts_with("amplitude") & 
+!starts_with("var") & 
+!starts_with("stddev") & 
+!starts_with("kurtosis") & 
+!starts_with("skewness") &
+!(X:num_window)
+)
+
+dim(trainclean)
+```
+Now the cleaned data only has 53 columns with valid values required for prediction  
+
+## Model Selection
+Here we will be comparing 2 different models  
+1. Model using the full training data (cleaned)  
+2. Model using only partitioned data  
+
+We will also compare 2 different methods and apply the most accurate one  
+1. Tree  
+2. Random Forest  
+
+### Model with full data
+First we will apply these 2 methods to the cleaned full data  
+
+```{r model1}
+ModFitTR1 <- train(classe ~ ., data = trainclean, method = "rpart")
+# ModFitTR1 contains the Model using Tree method
+controlvar <- trainControl(method = "cv", 5)
+ModFitRF1 <- train(classe ~ ., data = trainclean, method = "rf", trControl = controlvar, ntree = 250)
+# ModFitRF1 contains the Model using Random Forest method
+```
+
+We can see the accuracy of these 2 methods using confusionMatrix and select the most accurate method
+
+```{r model1-accuracy}
+confusionMatrix(ModFitTR1)
+confusionMatrix(ModFitRF1)
+```
+
+We can clearly note that Random Forest method is far better with 0.9941 accuracy
+
+### Model with Partitioned data
+
+Use the cleaned full data and make 2 partitions  
+1. 70% data for training  
+2. The rest for testing  
+
+Once we have the models, we can compare their accuracy using partitioned test data and calculate Out of Sample Error also  
+
+```{r model2}
+inTrain <- createDataPartition(trainclean$classe, p=0.70, list=FALSE)
+trainpartclean <- trainclean[inTrain, ]
+testpartclean <- trainclean[-inTrain, ]
+ModFitTR2 <- train(classe ~ ., data = trainpartclean, method = "rpart")
+ModFitRF2 <- train(classe ~ ., data = trainpartclean, method = "rf", trControl = controlvar, ntree = 250)
+confusionMatrix(ModFitTR2)
+confusionMatrix(ModFitRF2)
+```
+Here also we can see that Random Forest is more accurate  
+
+Now we can use the cleaned test data to compare these two methods  
+
+```{r model2-accuracy}
+predictresultTR <- predict(ModFitTR2, testpartclean)
+confusionMatrix(table(testpartclean$classe, predictresultTR))
+predictresultRF <- predict(ModFitRF2, testpartclean)
+confusionMatrix(table(testpartclean$classe, predictresultRF))
+accuTR <- confusionMatrix(table(testpartclean$classe, predictresultTR))$overall[1]
+accuRF <- confusionMatrix(table(testpartclean$classe, predictresultRF))$overall[1]
+
+ooseTR <- 1 - as.numeric(confusionMatrix(table(testpartclean$classe, predictresultTR))$overall[1])
+ooseRF <- 1 - as.numeric(confusionMatrix(table(testpartclean$classe, predictresultRF))$overall[1])
+
+print(paste('Accuracy of Tree method:', accuTR))
+print(paste('Accuracy of Random Forest method:', accuRF))
+
+print(paste('Out of Sample Error of Tree method:', ooseTR))
+print(paste('Out of Sample Error of Random Forest method:', ooseRF))
+```
+
+The results clearly show that Random Forest method is much better  
+We will use Random Forest method to predict test data ('testing') provided  
+
+## Prediction
+
+We have 2 models   
+1. Using full cleaned data (ModFitRF1)  
+2. Using partitioned training data (ModFitRF2)  
+
+We can apply both models and we can see that both gives the same result
+
+```{r predict-result}
+Result <- data.frame()
+for (i in 1:20) { 
+   Result[i,1] <- testing$problem_id[i]
+   Result[i,2] <- predict(ModFitRF1, newdata = testing[i,])
+   Result[i,3] <- predict(ModFitRF2, newdata = testing[i,])
+}
+colnames(Result) <- c("Problem_Id", "Model_1_Result", "Model_2_ Result")
+
+Result
+```
+
+# Conclusion
+
+Random Forest method is more accurate comparing to Tree method  
+Fitted 2 models with full data and partitioned data  
+Result of these 2 models give same prediction for this set of data
+  
+  
+-- The End --
+  
+  
